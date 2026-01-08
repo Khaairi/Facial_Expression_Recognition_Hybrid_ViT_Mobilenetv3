@@ -1,4 +1,5 @@
 import numpy as np
+import argparse
 import torch
 import torch.nn as nn
 from tqdm import tqdm
@@ -7,19 +8,35 @@ import matplotlib.pyplot as plt
 import random
 from sklearn.metrics import classification_report, confusion_matrix
 import seaborn as sns
+from pathlib import Path
 
 from data_setup import load_and_split_data, create_transforms, create_datasets, create_dataloaders
 from model import ViTMobilenet
 
-SEED = 123
-DATA_PATH = "data/fer2013v2_clean.csv"
-IMG_SIZE = 224
-BATCH_SIZE = 64
-NUM_CLASSES = 7
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-MODEL_PATH = "checkpoints/hybrid_mobilenet_vit_pooling_SAM_best.pt"
+current_script_path = Path(__file__).resolve()
+project_root = current_script_path.parent.parent
+DATA_PATH = project_root / "data" / "fer2013v2_clean.csv"
 
-def evaluate_model(best_model, test_loader):
+def get_args():
+    parser = argparse.ArgumentParser(description="Train Hybrid ViT-MobileNet with SAM")
+
+    # Experiment / Logging
+    parser.add_argument("--model_path", type=str, default=str(project_root / "results" / "hybrid_mobilenet_vit_pooling_SAM_best.pt"), 
+                        help="Name of the model for saving files (checkpoints, plots)")
+    parser.add_argument("--save_dir", type=str, default=str(project_root / "results"), 
+                        help="Directory to save results")
+    parser.add_argument("--seed", type=int, default=123, help="Random seed")
+
+    # Hyperparameters
+    parser.add_argument("--batch_size", type=int, default=64, help="Batch size for dataloaders")
+    parser.add_argument("--img_size", type=int, default=224, help="Input image size")
+
+    # Data
+    parser.add_argument("--data_path", type=str, default=str(DATA_PATH), help="Path to CSV data file")
+    
+    return parser.parse_args()
+
+def evaluate_model(best_model, test_loader, args, device, class_names):
     criterion = nn.CrossEntropyLoss()
     best_model.eval()
     test_loss = 0.0
@@ -31,7 +48,7 @@ def evaluate_model(best_model, test_loader):
     with torch.no_grad():  # Disable gradient computation
         pbar = tqdm(test_loader, desc="Testing")
         for batch_idx, (inputs, targets) in enumerate(pbar):
-            inputs, targets = inputs.to(DEVICE), targets.to(DEVICE)
+            inputs, targets = inputs.to(device), targets.to(device)
 
             # Forward pass
             outputs = best_model(inputs)
@@ -63,7 +80,7 @@ def evaluate_model(best_model, test_loader):
     per_class_accuracy = conf_matrix.diagonal() / conf_matrix.sum(axis=1)
 
     # Calculate classification report (includes precision, recall, F1-score, and support)
-    class_report = classification_report(all_targets, all_predicted, target_names=[f"Class {i}" for i in range(NUM_CLASSES)])
+    class_report = classification_report(all_targets, all_predicted, target_names=[f"Class {i}" for i in range(len(class_names))])
 
     # Print test summary
     print(f"Test Loss: {avg_test_loss:.4f}, "
@@ -97,23 +114,27 @@ def evaluate_model(best_model, test_loader):
     plt.show()
 
 if __name__ == "__main__":
+    args = get_args()
+
+    DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"Using device: {DEVICE}")
+    print(f"PyTorch version: {torch.__version__}")
+    print(f"Configuration: {args}")
+
     # Set random seeds for reproducibility
-    torch.manual_seed(SEED)
-    torch.cuda.manual_seed(SEED)
-    torch.cuda.manual_seed_all(SEED)
-    random.seed(SEED)
-    np.random.seed(SEED)
+    torch.manual_seed(args.seed)
+    torch.cuda.manual_seed(args.seed)
+    torch.cuda.manual_seed_all(args.seed)
+    random.seed(args.seed)
+    np.random.seed(args.seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-    print(f"Using device: {DEVICE}")
-    print(f"PyTorch version: {torch.__version__}")
-
-    train_transforms, test_transforms = create_transforms()
-    data_train, data_val, data_test = load_and_split_data(DATA_PATH)
+    train_transforms, test_transforms = create_transforms(args.img_size)
+    data_train, data_val, data_test = load_and_split_data(args.data_path, args.seed)
     train_dataset, val_dataset, test_dataset = create_datasets(data_train, data_val, data_test, train_transforms, test_transforms)
 
-    train_loader, val_loader, test_loader = create_dataloaders(train_dataset, val_dataset, test_dataset)
+    train_loader, val_loader, test_loader = create_dataloaders(train_dataset, val_dataset, test_dataset, args.batch_size, args.seed)
 
     class_names = ['Angry', 'Disgust', 'Fear', 'Happy', 'Sad', 'Surprise', 'Neutral']
 
@@ -125,7 +146,7 @@ if __name__ == "__main__":
                      mlp_size=3072)
     best_model = best_model.to(DEVICE)
     
-    checkpoint = torch.load(MODEL_PATH)
+    checkpoint = torch.load(args.model_path)
     best_model.load_state_dict(checkpoint["model_state_dict"])
     
-    evaluate_model(best_model, test_loader)
+    evaluate_model(best_model, test_loader, args, DEVICE, class_names)

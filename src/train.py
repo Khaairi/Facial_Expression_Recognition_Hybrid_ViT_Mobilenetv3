@@ -76,7 +76,7 @@ def train_model(model, train_loader, val_loader, args, device):
         # Training
         pbar = tqdm(train_loader, desc=f"Epoch {epoch + 1}/{args.epochs}")
         for batch_idx, (inputs, targets) in enumerate(pbar):
-            inputs, targets = inputs.to(DEVICE), targets.to(DEVICE)
+            inputs, targets = inputs.to(device), targets.to(device)
 
             # Zero the gradients
             optimizer.zero_grad()
@@ -127,7 +127,7 @@ def train_model(model, train_loader, val_loader, args, device):
         with torch.no_grad():  # Disable gradient computation
             pbar = tqdm(val_loader, desc=f"Epoch {epoch + 1}/{args.epochs} (Validation)")
             for batch_idx, (inputs, targets) in enumerate(pbar):
-                inputs, targets = inputs.to(DEVICE), targets.to(DEVICE)
+                inputs, targets = inputs.to(device), targets.to(device)
 
                 # Forward pass
                 outputs = model(inputs)
