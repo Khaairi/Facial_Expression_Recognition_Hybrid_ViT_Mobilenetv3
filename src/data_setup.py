@@ -6,10 +6,6 @@ from torchvision import transforms
 from PIL import Image
 from sklearn.model_selection import train_test_split
 
-SEED = 123
-IMG_SIZE = 224
-BATCH_SIZE = 64
-
 class FERDataset(Dataset):
     def __init__(self, dataframe, transform=None):
         self.dataframe = dataframe
@@ -41,7 +37,7 @@ class FERDataset(Dataset):
 
         return image, label
     
-def create_transforms():
+def create_transforms(IMG_SIZE):
     # Create transform pipeline manually
     train_transforms = transforms.Compose([
         transforms.Grayscale(num_output_channels=3),
@@ -67,7 +63,7 @@ def create_transforms():
     ])
     return train_transforms, test_transforms
 
-def load_and_split_data(data_path):
+def load_and_split_data(data_path, SEED):
     data = pd.read_csv(data_path)
     data_train, data_test = train_test_split(data, test_size=0.1, stratify=data['emotion'], random_state=SEED)
     data_train, data_val = train_test_split(data_train, test_size=0.1, stratify=data_train['emotion'], random_state=SEED)
@@ -79,7 +75,7 @@ def create_datasets(data_train, data_val, data_test, train_transforms, test_tran
     test_dataset = FERDataset(data_test, transform=test_transforms)
     return train_dataset, val_dataset, test_dataset
 
-def create_dataloaders(train_dataset, val_dataset, test_dataset):
+def create_dataloaders(train_dataset, val_dataset, test_dataset, BATCH_SIZE, SEED):
     train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True,
                              generator=torch.Generator().manual_seed(SEED))
     val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, 

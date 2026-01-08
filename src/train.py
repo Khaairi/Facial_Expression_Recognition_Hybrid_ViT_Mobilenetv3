@@ -1,4 +1,5 @@
 import numpy as np
+import argparse
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -8,32 +9,52 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 from sklearn.metrics import f1_score
 import matplotlib.pyplot as plt
 import random
+from pathlib import Path
 
-from dataset import load_and_split_data, create_transforms, create_datasets, create_dataloaders
+from data_setup import load_and_split_data, create_transforms, create_datasets, create_dataloaders
 from model import ViTMobilenet, SAM, EarlyStopping
 
-SEED = 123
-DATA_PATH = "data/fer2013v2_clean.csv"
-IMG_SIZE = 224
-BATCH_SIZE = 64
-EPOCHS = 50
-LEARNING_RATE = 1e-4
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-SAVE_DIR = "checkpoints"
+current_script_path = Path(__file__).resolve()
+project_root = current_script_path.parent.parent
+DATA_PATH = project_root / "data" / "fer2013v2_clean.csv"
 
-os.makedirs(SAVE_DIR, exist_ok=True)
+def get_args():
+    parser = argparse.ArgumentParser(description="Train Hybrid ViT-MobileNet with SAM")
 
-def train_model(model, train_loader, val_loader):
+    # Experiment / Logging
+    parser.add_argument("--model_name", type=str, default="hybrid_mobilenet_vit_pooling_SAM", 
+                        help="Name of the model for saving files (checkpoints, plots)")
+    parser.add_argument("--save_dir", type=str, default=str(project_root / "results"), 
+                        help="Directory to save results")
+    parser.add_argument("--seed", type=int, default=123, help="Random seed")
+
+    # Hyperparameters
+    parser.add_argument("--epochs", type=int, default=50, help="Number of training epochs")
+    parser.add_argument("--batch_size", type=int, default=64, help="Batch size for dataloaders")
+    parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
+    parser.add_argument("--img_size", type=int, default=224, help="Input image size")
+    
+    # Optimization
+    parser.add_argument("--sam_rho", type=float, default=0.05, help="Rho parameter for SAM optimizer")
+    parser.add_argument("--patience", type=int, default=10, help="Patience for Early Stopping")
+    parser.add_argument("--sched_patience", type=int, default=5, help="Patience for LR Scheduler")
+    parser.add_argument("--sched_factor", type=float, default=0.1, help="Factor for LR Scheduler")
+
+    # Data
+    parser.add_argument("--data_path", type=str, default=str(DATA_PATH), help="Path to CSV data file")
+    
+    return parser.parse_args()
+
+def train_model(model, train_loader, val_loader, args, device):
     # Initialize training utilities
-    base_optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE)
-    optimizer = SAM(model.parameters(), base_optimizer, rho=0.05)
+    base_optimizer = optim.AdamW(model.parameters(), lr=args.lr)
+    optimizer = SAM(model.parameters(), base_optimizer, rho=args.sam_rho)
     criterion = nn.CrossEntropyLoss()
-    scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=5)
-    early_stopping = EarlyStopping(patience=10, min_delta=0)
+    scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=args.sched_factor, patience=args.sched_patience)
+    early_stopping = EarlyStopping(patience=args.patience, min_delta=0)
 
     # Define path
-    SAVE_PATH = "results"
-    os.makedirs(SAVE_PATH, exist_ok=True)
+    os.makedirs(args.save_dir, exist_ok=True)
 
     # Initialize lists to store training and validation metrics
     train_losses = []
@@ -44,14 +65,16 @@ def train_model(model, train_loader, val_loader):
     # Initialize the best metric for model saving
     best_val_accuracy = -float('inf')
 
-    for epoch in range(EPOCHS):
+    print(f"Starting training for {args.epochs} epochs on {device}...")
+
+    for epoch in range(args.epochs):
         model.train()
         train_loss = 0.0
         correct = 0
         total = 0
 
         # Training
-        pbar = tqdm(train_loader, desc=f"Epoch {epoch + 1}/{EPOCHS}")
+        pbar = tqdm(train_loader, desc=f"Epoch {epoch + 1}/{args.epochs}")
         for batch_idx, (inputs, targets) in enumerate(pbar):
             inputs, targets = inputs.to(DEVICE), targets.to(DEVICE)
 
@@ -89,7 +112,7 @@ def train_model(model, train_loader, val_loader):
         train_accuracies.append(train_accuracy)
 
         # Print training summary
-        print(f"Epoch {epoch + 1}/{EPOCHS}: "
+        print(f"Epoch {epoch + 1}/{args.epochs}: "
               f"Train Loss: {avg_train_loss:.4f}, "
               f"Train Acc: {train_accuracy:.4f}")
 
@@ -102,7 +125,7 @@ def train_model(model, train_loader, val_loader):
         all_predicted = []
 
         with torch.no_grad():  # Disable gradient computation
-            pbar = tqdm(val_loader, desc=f"Epoch {epoch + 1}/{EPOCHS} (Validation)")
+            pbar = tqdm(val_loader, desc=f"Epoch {epoch + 1}/{args.epochs} (Validation)")
             for batch_idx, (inputs, targets) in enumerate(pbar):
                 inputs, targets = inputs.to(DEVICE), targets.to(DEVICE)
 
@@ -134,7 +157,7 @@ def train_model(model, train_loader, val_loader):
         val_accuracies.append(val_accuracy)
 
         # Print validation summary
-        print(f"Epoch {epoch + 1}/{EPOCHS}: "
+        print(f"Epoch {epoch + 1}/{args.epochs}: "
               f"Val Loss: {avg_val_loss:.4f}, "
               f"Val Acc: {val_accuracy:.4f}, "
               f"Val F1: {val_f1:.4f}")
@@ -149,7 +172,8 @@ def train_model(model, train_loader, val_loader):
         # Save the best model based on validation accuracy
         if val_accuracy > best_val_accuracy:
             best_val_accuracy = val_accuracy
-            model_path = os.path.join(SAVE_PATH, "hybrid_mobilenet_vit_pooling_SAM_best.pt")
+            model_filename = f"{args.model_name}_best.pt"
+            model_path = os.path.join(args.save_dir, model_filename)
             torch.save({
                 "model_state_dict": model.state_dict()
             }, model_path)
@@ -165,7 +189,7 @@ def train_model(model, train_loader, val_loader):
         plt.ylabel("Loss")
         plt.legend()
         plt.grid(True)
-        loss_plot_path = os.path.join(SAVE_PATH, "hybrid_mobilenet_vit_pooling_SAM_loss.png")
+        loss_plot_path = os.path.join(args.save_dir, f"{args.model_name}_loss.png")
         plt.savefig(loss_plot_path)
         plt.close()
 
@@ -177,7 +201,7 @@ def train_model(model, train_loader, val_loader):
         plt.ylabel("Accuracy")
         plt.legend()
         plt.grid(True)
-        accuracy_plot_path = os.path.join(SAVE_PATH, "hybrid_mobilenet_vit_pooling_SAM_accuracy.png")
+        accuracy_plot_path = os.path.join(args.save_dir, f"{args.model_name}_accuracy.png")
         plt.savefig(accuracy_plot_path)
         plt.close()
         
@@ -186,23 +210,28 @@ def train_model(model, train_loader, val_loader):
             break
 
 if __name__ == "__main__":
+    args = get_args()
+
+    DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"Using device: {DEVICE}")
+    print(f"PyTorch version: {torch.__version__}")
+    print(f"Configuration: {args}")
+
     # Set random seeds for reproducibility
-    torch.manual_seed(SEED)
-    torch.cuda.manual_seed(SEED)
-    torch.cuda.manual_seed_all(SEED)
-    random.seed(SEED)
-    np.random.seed(SEED)
+    torch.manual_seed(args.seed)
+    torch.cuda.manual_seed(args.seed)
+    torch.cuda.manual_seed_all(args.seed)
+    random.seed(args.seed)
+    np.random.seed(args.seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-    print(f"Using device: {DEVICE}")
-    print(f"PyTorch version: {torch.__version__}")
 
-    train_transforms, test_transforms = create_transforms()
-    data_train, data_val, data_test = load_and_split_data(DATA_PATH)
+    train_transforms, test_transforms = create_transforms(args.img_size)
+    data_train, data_val, data_test = load_and_split_data(args.data_path, args.seed)
     train_dataset, val_dataset, test_dataset = create_datasets(data_train, data_val, data_test, train_transforms, test_transforms)
 
-    train_loader, val_loader, test_loader = create_dataloaders(train_dataset, val_dataset, test_dataset)
+    train_loader, val_loader, test_loader = create_dataloaders(train_dataset, val_dataset, test_dataset, args.batch_size, args.seed)
 
     class_names = ['Angry', 'Disgust', 'Fear', 'Happy', 'Sad', 'Surprise', 'Neutral']
 
@@ -214,4 +243,4 @@ if __name__ == "__main__":
                 mlp_size=3072)
     model.to(DEVICE)
     
-    train_model(model, train_loader, val_loader)
+    train_model(model, train_loader, val_loader, args, DEVICE)

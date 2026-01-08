@@ -8,7 +8,7 @@ import random
 from sklearn.metrics import classification_report, confusion_matrix
 import seaborn as sns
 
-from dataset import load_and_split_data, create_transforms, create_datasets, create_dataloaders
+from data_setup import load_and_split_data, create_transforms, create_datasets, create_dataloaders
 from model import ViTMobilenet
 
 SEED = 123
