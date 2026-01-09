@@ -14,6 +14,8 @@ from pathlib import Path
 from data_setup import load_and_split_data, create_transforms, create_datasets, create_dataloaders
 from model import ViTMobilenet, SAM, EarlyStopping
 
+from torch.utils.tensorboard import SummaryWriter
+
 current_script_path = Path(__file__).resolve()
 project_root = current_script_path.parent.parent
 DATA_PATH = project_root / "data" / "fer2013v2_clean.csv"
@@ -24,7 +26,7 @@ def get_args():
     # Experiment / Logging
     parser.add_argument("--model_name", type=str, default="hybrid_mobilenet_vit_pooling_SAM", 
                         help="Name of the model for saving files (checkpoints, plots)")
-    parser.add_argument("--save_dir", type=str, default=str(project_root / "results"), 
+    parser.add_argument("--save_dir", type=str, default=str(project_root / "results2"), 
                         help="Directory to save results")
     parser.add_argument("--seed", type=int, default=123, help="Random seed")
 
@@ -53,6 +55,10 @@ def train_model(model, train_loader, val_loader, args, device):
     scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=args.sched_factor, patience=args.sched_patience)
     early_stopping = EarlyStopping(patience=args.patience, min_delta=0)
 
+    log_dir = os.path.join(args.save_dir, "logs")
+    writer = SummaryWriter(log_dir=log_dir)
+    print(f"TensorBoard logs will be saved to: {log_dir}")
+
     # Define path
     os.makedirs(args.save_dir, exist_ok=True)
 
@@ -66,6 +72,12 @@ def train_model(model, train_loader, val_loader, args, device):
     best_val_accuracy = -float('inf')
 
     print(f"Starting training for {args.epochs} epochs on {device}...")
+
+    # try:
+    #     dummy_input = torch.randn(1, 3, args.img_size, args.img_size).to(device)
+    #     writer.add_graph(model, dummy_input)
+    # except Exception as e:
+    #     print(f"Warning: Failed to log model graph to TensorBoard: {e}")
 
     for epoch in range(args.epochs):
         model.train()
@@ -161,6 +173,19 @@ def train_model(model, train_loader, val_loader, args, device):
               f"Val Loss: {avg_val_loss:.4f}, "
               f"Val Acc: {val_accuracy:.4f}, "
               f"Val F1: {val_f1:.4f}")
+        
+        writer.add_scalars(main_tag="Loss", 
+                           tag_scalar_dict={"train": avg_train_loss,
+                                            "val": avg_val_loss},
+                           global_step=epoch)
+        
+        writer.add_scalars(main_tag="Accuracy", 
+                           tag_scalar_dict={"train": train_accuracy,
+                                            "val": val_accuracy}, 
+                           global_step=epoch)
+        
+        writer.add_scalar("F1_Score/val", val_f1, epoch)
+        writer.add_scalar("Learning_Rate", optimizer.param_groups[0]['lr'], epoch)
 
         # Step the learning rate scheduler based on validation loss
         scheduler.step(avg_val_loss)
@@ -206,8 +231,11 @@ def train_model(model, train_loader, val_loader, args, device):
         plt.close()
         
         if early_stopping(avg_val_loss):
+            writer.close()
             print(f"Early stopping triggered at epoch {epoch + 1}!")
             break
+    writer.flush()
+    writer.close()
 
 if __name__ == "__main__":
     args = get_args()
