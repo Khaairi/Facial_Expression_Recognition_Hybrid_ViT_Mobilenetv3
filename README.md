@@ -51,13 +51,39 @@ source venv/bin/activate  # For Windows: venv\Scripts\activate
 ```bash
 pip install -r requirements.txt
 ```
-4. Place dataset (`fer2013v2_clean.csv`) inside `data/` folder and model checkpoint (`hybrid_mobilenet_vit_pooling_SAM_best.pt`) inside `checkpoints/` folder for model evaluation.
-5. Run training & evaluation model
+4. run (`download_dataset.py`) to download dataset for training from huggingface.
+5. Run Training. You can run training with default settings or customize hyperparameters using command-line arguments.
+- Default Run:
 ```bash
-python src/train.py # For model training
-python src/evaluate.py # For model evaluatio
+python src/train.py
 ```
-6. Checkpoints and results (plots, best model) will be saved in the `results/` folder.
+- Custom Run (Example):
+```bash
+python src/train.py --model_name "experiment_v2" --epochs 100 --batch_size 32 --lr 0.0005 --save_dir "results_v2"
+```
+- Available Arguments:
+  - `--model_name`: Name for saved files (checkpoints/plots).
+  - `--epochs`: Number of training epochs (default: 50).
+  - `--batch_size`: Batch size (default: 64).
+  - `--lr`: Learning rate (default: 1e-4).
+  - `--data_path`: Path to CSV dataset.
+  - `--save_dir`: Directory to save results (default: `results`).
+6. Run Evaluation Ensure the checkpoint (e.g., `hybrid_mobilenet_vit_pooling_SAM_best.pt`) is in the `results/` (or your custom) folder.
+```bash
+python src/evaluate.py
+```
+## Visualization (TensorBoard)
+This project uses **TensorBoard** to track training metrics (Loss, Accuracy, F1-Score) and visualize the model graph.
+
+To view the training progress:
+1. Open a new terminal.
+2. Run the following command (pointing to your results directory):
+```bash
+tensorboard --logdir=results/logs
+```
+3. Open your browser and go to `http://localhost:6006`.
+
+Note: If you used a custom `--save_dir` during training (e.g., `results_v2`), ensure you point TensorBoard to that directory (e.g., `--logdir=results_v2/logs`).
 
 ## Experimental Results
 Confusion matrix and training curves are available in the `results/` directory.
